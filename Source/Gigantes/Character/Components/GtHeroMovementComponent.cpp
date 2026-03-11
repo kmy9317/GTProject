@@ -31,6 +31,8 @@ void UGtHeroMovementComponent::CacheInitialValues()
     {
         StandingCapsuleHalfHeight = CharacterOwner->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight();
     }
+
+    InitStateProperties();
 }
 
 void UGtHeroMovementComponent::UpdateCharacterStateBeforeMovement(float DeltaSeconds)
@@ -64,42 +66,107 @@ void UGtHeroMovementComponent::UpdateCharacterStateBeforeMovement(float DeltaSec
 
 float UGtHeroMovementComponent::GetMaxSpeed() const
 {
-    if (HeroCharacterOwner && HeroCharacterOwner->bIsSprinting)
-    {
-        if (HeroCharacterOwner->HasStatusTag(GtGameplayTags::Status_Action_Aiming))
-        {
-            return SprintMaxSpeed * AimSpeedMultiplier;
-        }
-        return SprintMaxSpeed;
-    }
-
-    // Aiming 체크 - StatusTag로 확인
+    float BaseSpeed = GetCurrentStateProperties().MaxSpeed;
+    
+    // Aiming 배율은 모든 상태에 공통 적용
     if (HeroCharacterOwner && HeroCharacterOwner->HasStatusTag(GtGameplayTags::Status_Action_Aiming))
     {
-        // 기본 속도에 조준 배율 적용
-        return Super::GetMaxSpeed() * AimSpeedMultiplier;
-    }    
+        BaseSpeed *= AimSpeedMultiplier;
+    }
     
-    return Super::GetMaxSpeed();
+    return BaseSpeed;
 }
 
 float UGtHeroMovementComponent::GetMaxAcceleration() const
 {
-    if (HeroCharacterOwner && HeroCharacterOwner->bIsSprinting)
-    {
-        if (HeroCharacterOwner->HasStatusTag(GtGameplayTags::Status_Action_Aiming))
-        {
-            return SprintAcceleration * AimSpeedMultiplier;
-        }
-        return SprintAcceleration;
-    }
+    float BaseAccel = GetCurrentStateProperties().MaxAcceleration;
 
     if (HeroCharacterOwner && HeroCharacterOwner->HasStatusTag(GtGameplayTags::Status_Action_Aiming))
     {
-        return Super::GetMaxAcceleration() * AimSpeedMultiplier;
+        BaseAccel *= AimSpeedMultiplier;
     }
-    
-    return Super::GetMaxAcceleration();
+
+    return BaseAccel;
+}
+
+void UGtHeroMovementComponent::InitStateProperties()
+{
+    // 기본 상태 (Walking)
+    DefaultStateProperties.MaxSpeed = MaxWalkSpeed;
+    DefaultStateProperties.MaxAcceleration = GetMaxAcceleration();
+    DefaultStateProperties.bCanJump = true;
+    DefaultStateProperties.bCanCrouch = true;
+    DefaultStateProperties.bCanSprint = true;
+
+    // Sprint 상태
+    SprintStateProperties.MaxSpeed = SprintMaxSpeed;
+    SprintStateProperties.MaxAcceleration = SprintAcceleration;
+    SprintStateProperties.bCanJump = true;
+    SprintStateProperties.bCanCrouch = true;   // Crouch 입력 → Slide 전환용
+    SprintStateProperties.bCanSprint = true;
+
+    // Slide 상태
+    FMovementStateProperties SlideProps;
+    SlideProps.MaxSpeed = SlideMaxSpeed;
+    SlideProps.bCanJump = true;
+    SlideProps.bCanCrouch = false;
+    SlideProps.bCanSprint = false;
+    CustomModePropertiesMap.Add(CMM_Slide, SlideProps);
+
+    // WallRun 상태
+    FMovementStateProperties WallRunProps;
+    WallRunProps.MaxSpeed = WallRunMaxSpeed;
+    WallRunProps.bCanJump = true;
+    WallRunProps.bCanCrouch = false;
+    WallRunProps.bCanSprint = false;
+    CustomModePropertiesMap.Add(CMM_WallRun, WallRunProps);
+}
+const FMovementStateProperties& UGtHeroMovementComponent::GetCurrentStateProperties() const
+{
+    // Custom 모드 (Slide, WallRun)
+    if (MovementMode == MOVE_Custom)
+    {
+        if (const FMovementStateProperties* Props = CustomModePropertiesMap.Find(CustomMovementMode))
+        {
+            return *Props;
+        }
+    }
+
+    // Sprint 상태
+    if (HeroCharacterOwner && HeroCharacterOwner->bIsSprinting)
+    {
+        return SprintStateProperties;
+    }
+
+    return DefaultStateProperties;
+}
+
+void UGtHeroMovementComponent::HandleMovementInput(EMovementInput InputType)
+{
+    // 전역 차단: Dead 상태면 모든 이동 입력 무시
+    if (HeroCharacterOwner && HeroCharacterOwner->HasStatusTag(GtGameplayTags::Status_Dead))
+    {
+        return;
+    }
+
+    switch (InputType)
+    {
+    case EMovementInput::Jump:
+        HandleJumpInput();
+        break;
+
+    case EMovementInput::Crouch:
+        HandleCrouchInput();
+        break;
+
+    case EMovementInput::SprintStart:
+        HandleSprintInput(true);
+        break;
+
+    case EMovementInput::SprintStop:
+        HandleSprintInput(false);
+        break;
+    }
 }
 
 void UGtHeroMovementComponent::OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode)
@@ -182,6 +249,56 @@ bool UGtHeroMovementComponent::TryEnterWallRun()
     return false;
 }
 
+void UGtHeroMovementComponent::HandleJumpInput()
+{
+    // 슬라이딩 중 점프 → 슬라이드 캔슬 + 부스트 점프
+    if (IsSliding())
+    {
+        const FVector PreSlideVelocity = Velocity;
+        EndSlide(ESlideEndReason::Jump);
+
+        if (HeroCharacterOwner)
+        {
+            // CanJump 체크: 지상이거나 더블점프 가능
+            if (HeroCharacterOwner->CanJump())
+            {
+                FVector JumpBoost = PreSlideVelocity.GetSafeNormal2D() * 200.0f;
+                JumpBoost.Z = JumpZVelocity;
+                HeroCharacterOwner->LaunchCharacter(JumpBoost, false, true);
+                HeroCharacterOwner->IncrementJumpCount();
+            }
+        }
+        return;
+    }
+
+    // 웅크린 상태에서 점프 → 웅크리기 해제만
+    if (HeroCharacterOwner && HeroCharacterOwner->bIsCrouched)
+    {
+        HeroCharacterOwner->UnCrouch();
+        return;
+    }
+
+    // 월런 중 점프 → 월 점프킥
+    if (IsWallRunning())
+    {
+        const FVector LaunchVelocity = WallRunNormal * WallRunJumpOffForce
+            + FVector::UpVector * JumpZVelocity;
+        if (HeroCharacterOwner)
+        {
+            HeroCharacterOwner->LaunchCharacter(LaunchVelocity, false, true);
+            HeroCharacterOwner->IncrementJumpCount();
+        }
+        EndWallRun();
+        return;
+    }
+
+    // 일반 점프 / 더블 점프
+    if (HeroCharacterOwner && HeroCharacterOwner->CanJump())
+    {
+        HeroCharacterOwner->Jump();
+    }
+}
+
 void UGtHeroMovementComponent::StartWallRun(bool bIsRightWallParam)
 {
     bIsRightWall = bIsRightWallParam;
@@ -196,6 +313,41 @@ void UGtHeroMovementComponent::EndWallRun()
     bOrientRotationToMovement = true;
     SetMovementMode(MOVE_Falling);
     WallRunEndTime = GetWorld()->GetTimeSeconds();
+}
+
+void UGtHeroMovementComponent::HandleCrouchInput()
+{
+    // 슬라이딩 중 Crouch → 슬라이드 종료
+    if (IsSliding())
+    {
+        EndSlide(ESlideEndReason::CrouchInput);
+        return;
+    }
+
+    if (!HeroCharacterOwner)
+    {
+        return;
+    }
+
+    // 이미 웅크린 상태 → 해제
+    if (HeroCharacterOwner->bIsCrouched)
+    {
+        HeroCharacterOwner->UnCrouch();
+        return;
+    }
+
+    // Sprint 중 Crouch → Slide 시도
+    if (HeroCharacterOwner->bIsSprinting)
+    {
+        if (CanSlide())
+        {
+            StartSlide();
+            return;
+        }
+    }
+
+    // 그 외 → 일반 Crouch
+    HeroCharacterOwner->Crouch();
 }
 
 void UGtHeroMovementComponent::StartSlide()
@@ -610,6 +762,23 @@ void UGtHeroMovementComponent::PhysSlide(float DeltaTime, int32 Iterations)
     }
 }
 
+void UGtHeroMovementComponent::HandleSprintInput(bool bPressed)
+{
+    if (bPressed)
+    {
+        // Crouch 상태에서 Sprint 시작 시 먼저 Crouch 해제
+        if (HeroCharacterOwner && HeroCharacterOwner->bIsCrouched)
+        {
+            HeroCharacterOwner->UnCrouch();
+        }
+        SetSprintInput(true);
+    }
+    else
+    {
+        SetSprintInput(false);
+    }
+}
+
 void UGtHeroMovementComponent::Sprint()
 {
     if (!HeroCharacterOwner)
@@ -644,8 +813,10 @@ void UGtHeroMovementComponent::UnSprint(ESprintEndReason Reason)
 
 bool UGtHeroMovementComponent::CanSprintInCurrentState() const
 {
-    if (IsCrouching() || IsSliding() || IsWallRunning())
+    if (!GetCurrentStateProperties().bCanSprint)
+    {
         return false;
+    }
 
     // Sprint 상태였으면 공중에서도 우선 조건 통과 (착지 시 자동 재개를 위함)
     // 새로 시작할 때만 지상 체크

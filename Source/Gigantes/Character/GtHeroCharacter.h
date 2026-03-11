@@ -29,6 +29,8 @@ public:
 	virtual bool CanJumpInternal_Implementation() const override;
 	virtual void OnJumped_Implementation() override;
 
+	void IncrementJumpCount() { JumpCount++; }
+
 	/**
 	 * Crouch 관련 함수들
 	 */
@@ -101,10 +103,7 @@ protected:
 	// [추가]
 	UFUNCTION()
 	void OnMontageEnded(UAnimMontage* Montage, bool bInterrupted);
-
-	bool ShouldStartSlide() const;
-	void StartSlide();
-
+	
 	bool CanPerformAction() const;
 	
 private:

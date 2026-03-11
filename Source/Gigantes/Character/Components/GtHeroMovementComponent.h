@@ -8,6 +8,36 @@
 
 class AGtHeroCharacter;
 
+UENUM()
+enum class EMovementInput : uint8
+{
+	Jump,
+	Crouch,
+	SprintStart,
+	SprintStop,
+};
+
+USTRUCT()
+struct FMovementStateProperties
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditDefaultsOnly)
+	float MaxSpeed = 600.f;
+
+	UPROPERTY(EditDefaultsOnly)
+	float MaxAcceleration = 2048.f;
+
+	UPROPERTY(EditDefaultsOnly)
+	bool bCanJump = true;
+
+	UPROPERTY(EditDefaultsOnly)
+	bool bCanCrouch = true;
+
+	UPROPERTY(EditDefaultsOnly)
+	bool bCanSprint = true;
+};
+
 DECLARE_DELEGATE_OneParam(FOnSlideStateChanged, bool /*bIsSliding*/);
 
 UENUM(BlueprintType)
@@ -54,6 +84,10 @@ public:
 	virtual float GetMaxSpeed() const override;
 	virtual float GetMaxAcceleration() const override;
 
+	const FMovementStateProperties& GetCurrentStateProperties() const;
+
+	void HandleMovementInput(EMovementInput InputType);
+	
 	void StartWallRun(bool bIsRightWall);
 	void EndWallRun();
 	bool TryEnterWallRun(); 
@@ -95,6 +129,12 @@ protected:
 
 private:
 
+	void InitStateProperties();
+
+	void HandleJumpInput();
+	void HandleCrouchInput();
+	void HandleSprintInput(bool bPressed);
+
 	void CheckForWallRun();
 	bool ShouldCheckForWallRun() const;
 	
@@ -105,6 +145,15 @@ private:
 	void CacheInitialValues();
 	
 public:
+
+	UPROPERTY(EditDefaultsOnly, Category = "Movement|StateProperties")
+	FMovementStateProperties DefaultStateProperties;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Movement|StateProperties")
+	FMovementStateProperties SprintStateProperties;
+
+	UPROPERTY()
+	TMap<uint8, FMovementStateProperties> CustomModePropertiesMap;
 
 	/**
 	 * WallRun 관련 속성들

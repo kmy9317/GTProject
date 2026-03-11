@@ -185,102 +185,34 @@ void AGtHeroCharacter::Input_Look(const FInputActionValue& InputActionValue)
 
 void AGtHeroCharacter::Input_Jump(const FInputActionValue& InputActionValue)
 {
-	if (HasStatusTag(GtGameplayTags::Status_Dead))
+	if (HeroMovementComponent)
 	{
-		return;
-	}
-	
-	// 슬라이딩 중 점프 시 슬라이드 캔슬하고 점프
-	if (HasStatusTag(GtGameplayTags::Status_Action_Sliding))
-	{
-		const FVector PreSlideVelocity = GetVelocity();
-		HeroMovementComponent->EndSlide(ESlideEndReason::Jump);
-		
-		if (CanJump())
-		{
-			// 현재 속도 방향으로 추가 추진력
-			FVector JumpBoost = PreSlideVelocity.GetSafeNormal2D() * 200.0f;
-			JumpBoost.Z = GetCharacterMovement()->JumpZVelocity;
-			LaunchCharacter(JumpBoost, false, true);
-			JumpCount++;
-		}
-		return;
-	}
-	
-	// 웅크린 상태에서 점프 입력 시 웅크리기 해제만
-	if (HasStatusTag(GtGameplayTags::Status_Action_Crouching))
-	{
-		UnCrouch();
-		return;  
-	}
-
-	// 현재 상태에 따라 벽 점프킥 or 일반 점프
-	if (HasStatusTag(GtGameplayTags::Status_Action_WallRunning))
-	{
-		// 월런 점프 로직
-		const FVector LaunchVelocity = HeroMovementComponent->GetWallRunNormal() * HeroMovementComponent->WallRunJumpOffForce
-			+ FVector::UpVector * HeroMovementComponent->JumpZVelocity;
-		LaunchCharacter(LaunchVelocity, false, true);
-		JumpCount++;
-
-		// 월런 상태 종료 (태그 제거는 OnMovementModeChanged에서 자동으로 처리될 수 있도록)
-		HeroMovementComponent->EndWallRun();
-	}
-	else if (CanJump())
-	{
-		// 일반 점프 / 더블 점프
-		Jump();
+		HeroMovementComponent->HandleMovementInput(EMovementInput::Jump);
 	}
 }
 
 void AGtHeroCharacter::Input_Crouch(const FInputActionValue& InputActionValue)
 {
-	if (HasStatusTag(GtGameplayTags::Status_Dead))
+	if (HeroMovementComponent)
 	{
-		return;
+		HeroMovementComponent->HandleMovementInput(EMovementInput::Crouch);
 	}
-
-	if (HasStatusTag(GtGameplayTags::Status_Action_Sliding))
-	{
-		HeroMovementComponent->EndSlide(ESlideEndReason::CrouchInput);
-		return;
-	}
-	
-	if (HasStatusTag(GtGameplayTags::Status_Action_Crouching))
-	{
-		UnCrouch();
-		return;
-	}
-	if (HasStatusTag(GtGameplayTags::Status_Action_Sprinting))
-	{
-		if (ShouldStartSlide())
-		{
-			StartSlide();
-			return;
-		}
-	}
-	
-	Crouch();
 }
 
 void AGtHeroCharacter::Input_SprintStart(const FInputActionValue& InputActionValue)
 {
-	if (HasStatusTag(GtGameplayTags::Status_Dead))
+	if (HeroMovementComponent)
 	{
-		return;
+		HeroMovementComponent->HandleMovementInput(EMovementInput::SprintStart);
 	}
-	
-	Sprint();
 }
 
 void AGtHeroCharacter::Input_SprintStop(const FInputActionValue& InputActionValue)
 {
-	if (HasStatusTag(GtGameplayTags::Status_Dead))
+	if (HeroMovementComponent)
 	{
-		return;
+		HeroMovementComponent->HandleMovementInput(EMovementInput::SprintStop);
 	}
-	
-	UnSprint();
 }
 
 void AGtHeroCharacter::Input_PrimaryActionPressed(const FInputActionValue& InputActionValue)
@@ -410,19 +342,17 @@ void AGtHeroCharacter::Input_UseConsumableSlot(const FInputActionValue& InputAct
 
 bool AGtHeroCharacter::CanJumpInternal_Implementation() const
 {
-	// 슬라이딩 중에는 점프 가능
-	if (HasStatusTag(GtGameplayTags::Status_Action_Sliding))
+	if (!HeroMovementComponent)
 	{
-		return GetCharacterMovement()->IsMovingOnGround() || JumpCount < MaxJumpCount;
+		return false;
 	}
 
-	if (HasStatusTag(GtGameplayTags::Status_Action_Sprinting))
+	if (!HeroMovementComponent->GetCurrentStateProperties().bCanJump)
 	{
-		return GetCharacterMovement()->IsMovingOnGround() || JumpCount < MaxJumpCount;
+		return false;
 	}
-	
-	// 웅크린 상태에서는 점프 불가
-	if (HasStatusTag(GtGameplayTags::Status_Action_Crouching))
+
+	if (bIsCrouched)
 	{
 		return false;
 	}
@@ -451,8 +381,12 @@ void AGtHeroCharacter::OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeigh
 
 bool AGtHeroCharacter::CanCrouch() const
 {
-	// 월런 상태에서는 Crouch 불가
-	if (HasStatusTag(GtGameplayTags::Status_Action_WallRunning))
+	if (!HeroMovementComponent)
+	{
+		return false;
+	}
+
+	if (!HeroMovementComponent->GetCurrentStateProperties().bCanCrouch)
 	{
 		return false;
 	}
@@ -476,11 +410,7 @@ void AGtHeroCharacter::Sprint()
 {
 	if (HeroMovementComponent)
 	{
-		if (bIsCrouched)
-		{
-			UnCrouch();
-		}
-		HeroMovementComponent->SetSprintInput(true);
+		HeroMovementComponent->HandleMovementInput(EMovementInput::SprintStart);
 	}
 }
 
@@ -488,7 +418,7 @@ void AGtHeroCharacter::UnSprint()
 {
 	if (HeroMovementComponent)
 	{
-		HeroMovementComponent->SetSprintInput(false);
+		HeroMovementComponent->HandleMovementInput(EMovementInput::SprintStop);
 	}
 }
 
@@ -500,25 +430,6 @@ void AGtHeroCharacter::OnStartSprint()
 void AGtHeroCharacter::OnEndSprint()
 {
 	RemoveStatusTag(GtGameplayTags::Status_Action_Sprinting);
-}
-
-bool AGtHeroCharacter::ShouldStartSlide() const
-{
-	if (!HeroMovementComponent)
-		return false;
-    
-	// MovementComponent에서 슬라이드 가능 여부 확인
-	return HeroMovementComponent->CanSlide();
-}
-
-void AGtHeroCharacter::StartSlide()
-{
-	if (!HeroMovementComponent)
-	{
-		return;
-	}
-	// MovementComponent에 슬라이드 움직임 시작 요청
-	HeroMovementComponent->StartSlide();
 }
 
 bool AGtHeroCharacter::CanPerformAction() const
