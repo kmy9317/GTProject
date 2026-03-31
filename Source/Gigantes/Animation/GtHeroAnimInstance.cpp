@@ -109,6 +109,9 @@ void UGtHeroAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
 	UpdateWeaponStates(HeroAnimProxy);
 	UpdateIKState(HeroAnimProxy);
 	UpdateHandIK(HeroAnimProxy);
+
+	bShouldBlendCombat = bIsEquipped && bUseAimOffset;
+	bShouldApplyHandIK = bIsEquipped && bIsLeftHandIKEnabled;
 }
 
 void UGtHeroAnimInstance::UpdateMovementStates(const FGtHeroAnimInstanceProxy& Proxy)

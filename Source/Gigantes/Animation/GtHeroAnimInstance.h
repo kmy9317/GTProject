@@ -85,6 +85,12 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "HandBoneIK")
 	bool bIsLeftHandIKEnabled = false;
 
+	UPROPERTY(BlueprintReadOnly, Category = "BlendControl")
+	bool bShouldBlendCombat = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "BlendControl")
+	bool bShouldApplyHandIK = false;
+
 	UPROPERTY(BlueprintReadOnly, Category = "HandBoneIK")
 	FVector JointTargetLocation = FVector::ZeroVector;
 
