@@ -22,7 +22,7 @@ UE5 C++ 기반 3인칭 싱글플레이 파쿠르 TPS 게임입니다.
 
 > *아래 썸네일을 클릭하면 유튜브에서 시청할 수 있습니다.*
 
-[![Gigantes 시연 영상](https://img.youtube.com/vi/fgi0c_EcYZk/0.jpg)](https://www.youtube.com/watch?v=fgi0c_EcYZk&t=97s)
+[![Gigantes 시연 영상](https://www.youtube.com/watch?v=fgi0c_EcYZk)
 
 ---
 
